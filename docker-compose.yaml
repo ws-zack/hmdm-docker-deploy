@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: ${SQL_PASS}
       POSTGRES_DB: ${SQL_BASE}
     volumes:
-      - ./volumes/db:/var/lib/postgresql/data
+      - ${HMDM_DATA_ROOT:-./volumes}/db:/var/lib/postgresql/data
     networks:
       - hmdm-backend
 
@@ -22,9 +22,9 @@ services:
       - "${HMDM_BIND_ADDRESS:-127.0.0.1}:${HMDM_HTTP_PORT:-18080}:8080"
       - "${HMDM_MQTT_PORT:-31000}:31000"
     volumes:
-      - ./volumes/work:/usr/local/tomcat/work
-      - ./volumes/hmdm-config:/usr/local/tomcat/conf/Catalina/localhost
-      - ./volumes/webapps:/usr/local/tomcat/webapps
+      - ${HMDM_DATA_ROOT:-./volumes}/work:/usr/local/tomcat/work
+      - ${HMDM_DATA_ROOT:-./volumes}/hmdm-config:/usr/local/tomcat/conf/Catalina/localhost
+      - ${HMDM_DATA_ROOT:-./volumes}/webapps:/usr/local/tomcat/webapps
     environment:
       SQL_HOST: postgresql
       SQL_PORT: 5432
