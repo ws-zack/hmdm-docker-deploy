@@ -12,7 +12,9 @@ services:
       - hmdm-backend
 
   hmdm:
-    image: headwindmdm/hmdm:0.1.9
+    build:
+      context: .
+    image: hmdm-docker-deploy:0.1.9
     restart: unless-stopped
     depends_on:
       - postgresql
