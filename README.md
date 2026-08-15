@@ -4,6 +4,8 @@ This repository packages Headwind MDM for Docker and includes a deployment profi
 
 Headwind MDM project: https://h-mdm.com
 
+> **Why is this a fork?** See [`WHY_FORK.md`](WHY_FORK.md) for the deployment problem this fork addresses, the intended scope of the changes, and the relationship to upstream Headwind MDM.
+
 ## Why this deployment profile exists
 
 The upstream Docker configuration assumes Headwind/Tomcat owns HTTPS and certificate handling. On shared application hosts it is common to run one host-level reverse proxy and certificate manager for multiple services.
@@ -95,18 +97,18 @@ To update the container image or WAR defaults, compare this repository with the 
 
 ## Persistent data
 
-The Compose deployment stores persistent state under `./volumes`:
+The Compose deployment stores persistent state under `${HMDM_DATA_ROOT:-./volumes}`:
 
 ```text
-volumes/db
-volumes/work
-volumes/hmdm-config
-volumes/webapps
+${HMDM_DATA_ROOT}/db
+${HMDM_DATA_ROOT}/work
+${HMDM_DATA_ROOT}/hmdm-config
+${HMDM_DATA_ROOT}/webapps
 ```
 
-Do not delete these paths during normal upgrades.
+For shared or production hosts, set `HMDM_DATA_ROOT` to a persistent host path outside the source checkout, for example `/srv/hmdm-docker-deploy`. Do not delete these paths during normal upgrades.
 
-The generated Headwind Tomcat context is stored under `volumes/hmdm-config/ROOT.xml`. Manual changes to that file are preserved unless `FORCE_RECONFIGURE=true` is used.
+The generated Headwind Tomcat context is stored under `${HMDM_DATA_ROOT}/hmdm-config/ROOT.xml`. Manual changes to that file are preserved unless `FORCE_RECONFIGURE=true` is used.
 
 ## Reverse-proxy security
 
