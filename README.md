@@ -1,230 +1,121 @@
-# Docker image for Headwind MDM
+# Headwind MDM Docker deployment
 
-Headwind MDM is an open source mobile device management software for Android 
-devices. It has been originally designed for Ubuntu Linux. This image helps
-to run Headwind MDM on any Linux.
+This repository packages Headwind MDM for Docker and includes a deployment profile for installations where HTTPS is terminated by an external reverse proxy such as nginx, Apache, HAProxy, Traefik, Caddy, or a cloud load balancer.
 
-Headwind MDM project URL: https://h-mdm.com
+Headwind MDM project: https://h-mdm.com
 
-## TL;DR
+> **Why is this a fork?** See [`WHY_FORK.md`](WHY_FORK.md) for the deployment problem this fork addresses, the intended scope of the changes, and the relationship to upstream Headwind MDM.
 
-For a quick start, proceed directly to the ["Running with the most common options by Docker Compose"](#quickstart) section.
+## Why this deployment profile exists
 
-## Summary
+The upstream Docker configuration assumes Headwind/Tomcat owns HTTPS and certificate handling. On shared application hosts it is common to run one host-level reverse proxy and certificate manager for multiple services.
 
-The image is based on Ubuntu 22.04 and Tomcat 9.
+This repository supports that model by separating:
 
-It doesn't include PostgreSQL and certbot, so they need to be started in
-separate containers or on the host machine.
+- `BASE_URL`: the externally visible Headwind URL, for example `https://mdm.example.com`
+- `PROTOCOL`: the transport used by Tomcat itself, normally `http` behind a reverse proxy
 
-As an alternative, you can use docker-compose to run Headwind MDM and all 
-required packages (certbot, PostgreSQL) on a fresh virtual machine with the 
-most common options (see below).
+When `BASE_URL` is unset, the original behavior is preserved and Headwind uses `PROTOCOL://BASE_DOMAIN`.
 
-## Building the image from the source code
+## Default Docker Compose topology
 
-Before building the image, review the default variables (in particular the 
-Headwind MDM URL) in the Dockerfile and change them if required.
+The provided `docker-compose.yaml` runs two services:
 
-The build command is:
+- `hmdm`: Headwind MDM/Tomcat
+- `postgresql`: private PostgreSQL database
 
-    docker build -t headwindmdm/hmdm:0.1.9 .
+The defaults are deliberately suitable for a shared reverse-proxy host:
 
-## Prerequisites
+- Headwind HTTP binds to `127.0.0.1:18080`
+- PostgreSQL is not published on a host port
+- the stack uses a dedicated `hmdm-backend` Docker network
+- MQTT remains published on TCP 31000 for managed devices
+- TLS certificates remain outside this Compose stack
 
-1. Create the PostgreSQL database for Headwind MDM, and use the environment
-variables SQL_HOST, SQL_BASE, SQL_USER, SQL_PASS to define the database access
-credentials.
+Copy `.env.example` to `.env` and replace the example credentials and domain:
 
-Default values are: SQL_HOST=localhost, SQL_BASE=hmdm, SQL_USER=hmdm,
-SQL_PASS=topsecret
+```sh
+cp .env.example .env
+$EDITOR .env
+docker compose up -d
+```
 
-2. If you want to use HTTPS, install certbot and generate the certificate for
-the domain where Headwind MDM should be installed.
+A typical reverse-proxy deployment uses:
 
-    certbot certonly --standalone --force-renewal -d mdm.your-domain.com 
+```dotenv
+BASE_DOMAIN=mdm.example.com
+BASE_URL=https://mdm.example.com
+PROTOCOL=http
+HMDM_BIND_ADDRESS=127.0.0.1
+HMDM_HTTP_PORT=18080
+HMDM_NETWORK_NAME=hmdm-backend
+```
 
-## Running the Docker container
+The reverse proxy should forward public HTTPS requests to `http://127.0.0.1:18080` and pass at least `Host`, `X-Real-IP`, `X-Forwarded-For`, and `X-Forwarded-Proto` headers. See `examples/nginx.conf` for a working nginx example.
 
-**Works with the external PostgreSQL database only. Default database installation on localhost DOES NOT WORK!**
+## Ports
 
-**Please set up your domain name when running Headwind MDM!**
+| Port | Default exposure | Purpose |
+|---|---|---|
+| 18080/tcp | loopback only | Headwind HTTP backend for the external reverse proxy |
+| 31000/tcp | host/public | Headwind MQTT device notifications |
+| 5432/tcp | Docker network only | PostgreSQL |
 
-To create the container, use the command:
+If MQTT is not required, or is proxied separately, adjust the Compose publishing accordingly.
 
-    docker run -d -p 443:8443 -p 31000:31000 -e SQL_HOST=database.host -e SQL_BASE=hmdm -e SQL_USER=hmdm -e SQL_PASS=password -e BASE_DOMAIN=mdm.your-domain.com -v /etc/letsencrypt:/etc/letsencrypt -v $(pwd)/volumes/work:/usr/local/tomcat/work --name="hmdm" headwindmdm/hmdm:0.1.9
+## Configuration variables
 
-If everything is fine, Headwind MDM will become available via the url 
-`https://mdm.your-domain.com` in a few seconds. 
+The image supports the upstream Headwind variables plus `BASE_URL`.
 
-To view logs, use the command:
+`BASE_URL` is optional. When set, it becomes the Headwind `base.url` and is also used when generating initial application URLs. This allows:
 
-    docker logs hmdm
+```text
+Internet client -> HTTPS reverse proxy -> HTTP Tomcat
+```
 
-Stop and start the container:
+without causing Headwind to generate `http://` URLs for its public address.
 
-    docker stop hmdm
-    docker start hmdm
+`FORCE_RECONFIGURE=true` regenerates the Headwind configuration from the environment. Leave it unset during normal operation.
 
-Connect to the container for debugging:
+## Building the image
 
-    docker exec -it hmdm /bin/bash
+```sh
+docker build -t headwindmdm/hmdm:0.1.9 .
+```
 
-## Configuration of Headwind MDM
+The Dockerfile remains compatible with Headwind's normal direct-HTTPS deployment. If `BASE_URL` is not supplied, the entrypoint falls back to the original `PROTOCOL://BASE_DOMAIN` behavior.
 
-The container is configured by the environment variables.
+## Updating Headwind
 
-The full list of variables can be found in the Dockerfile.
+Headwind can update its web panel through the administration interface. After downloading an update, restart the container:
 
-## First start and subsequent starts
+```sh
+docker compose restart hmdm
+```
 
-At first start, Headwind MDM performs the initialization:
+To update the container image or WAR defaults, compare this repository with the current upstream `h-mdm/hmdm-docker` project before deploying the new version.
 
-  - Creates the config files using the environment
-  - Initializes the database
-  - Converts the LetsEncrypt's (or your own) SSL certificates to a JKS keystore
+## Persistent data
 
-Subsequent starts of the container skip this step, but you can force the
-configuration renewal by setting the following environment variable:
+The Compose deployment stores persistent state under `${HMDM_DATA_ROOT:-./volumes}`:
 
-FORCE_RECONFIGURE=true
+```text
+${HMDM_DATA_ROOT}/db
+${HMDM_DATA_ROOT}/work
+${HMDM_DATA_ROOT}/hmdm-config
+${HMDM_DATA_ROOT}/webapps
+```
 
-When this variable is set to true, the configuration is always re-created by the
-Headwind MDM entry point script. 
+For shared or production hosts, set `HMDM_DATA_ROOT` to a persistent host path outside the source checkout, for example `/srv/hmdm-docker-deploy`. Do not delete these paths during normal upgrades.
 
-<a id="quickstart"></a>
-## Running with the most common options by Docker Compose
+The generated Headwind Tomcat context is stored under `${HMDM_DATA_ROOT}/hmdm-config/ROOT.xml`. Manual changes to that file are preserved unless `FORCE_RECONFIGURE=true` is used.
 
-Docker-Compose requires just two files to start Headwind MDM: 
-    .env
-    docker-compose.yaml
+## Reverse-proxy security
 
-For a simple start of Headwind MDM on a fresh virtual machine, run the 
-following commands.
+The Headwind server has separate device-facing and administrative REST paths and supports application-level IP restrictions in its context configuration. A reverse proxy may add another security boundary around the administrative UI, but device enrollment, synchronization, notifications, downloads, and enabled plugin endpoints must remain reachable by managed devices.
 
-    apt install -y docker-compose
-    cd hmdm-docker
-    cp .env.example .env
-    vim .env              # Replace ADMIN_EMAIL and BASE_DOMAIN to your values
-    docker-compose up
+For installations exposed to the Internet, use strong Headwind credentials, MQTT authentication, HTTPS at the public edge, and review Headwind's secure-enrollment and IP-filter options before production enrollment.
 
-The command `docker-compose up` will start Headwind MDM in the interactive 
-mode where you can easily trace and fix errors.
+## License
 
-Once Headwind MDM start is successful, you can start it in the background
-(detached) mode by using the command:
-
-    docker-compose up -d
-
-To view logs, use the command:
-
-    docker-compose logs hmdm -f
-
-To stop (but not remove) the service, use the command:
-
-    docker-compose stop
-
-## Using this Docker container with the Premium version
-
-To run Premium version, you need to change the HMDM_VARIANT, DOWNLOAD_CREDENTIALS
-and HMDM_URL variables in the .env file. To get the trial URLs, credentials and
-license keys, please fill the form at
-
-https://h-mdm.com/contact-us/
-
-## Updating the software
-
-To update Headwind MDM web panel, sign in, and download the new version through
-**admin -> check for updates** (click "Update" to download updates).
-
-Once the update is downloaded, restart the container - it should install the 
-new version.
-
-    docker-compose restart hmdm
-	
-Notice: using start and stop instead of restart WILL NOT run the update.
-
-In the browser, reload the Headwind MDM web application (Ctrl-F5 in Chrome), 
-and check the version through **admin -> About**. If you still see the old 
-version, try clearing the browser cache.
-
-To update both Headwind MDM and Tomcat services, compare the version of the 
-hmdm container in docker-compose.yaml with the latest tag at 
-https://github.com/h-mdm/hmdm-docker. 
-
-If your version is outdated, update the version number in docker-compose.yaml 
-and pull the changes:
-
-    docker-compose up -d
-
-## Attaching to the container
-
-You may need to attach to the container to change the Headwind MDM configuration
-in order to adjust some advanced settings.
-
-To find the container ID, use the command
-
-    docker ps
-
-Find the container ID of the image headwindmdm/hmdm:0.1.9, then run the command
-
-    docker exec -it containerid /bin/bash
-
-For example:
-
-    docker exec -it e81d47acec21 /bin/bash
-
-Notice: the container needs to be started before attaching to it.
-
-## Resetting the container
-
-If something goes wrong, you may wish to reset the container and reinstall it 
-from scratch. The command 
-
-    docker-compose down
-    
-may not be enough, as it doesn't clear the downloaded files and initialized 
-database.
-
-To wipe all data, remove all entries in the `volumes` subdirectory:
-
-    rm -rf volumes/db volumes/work
-    
-(we recommend to keep the `volumes/letsencrypt` subdirectory to avoid problems
-with exceeding the LetsEncrypt certificate generation threshold).
-
-There is also an interactive script removing the data:
-
-    ./remove-all.sh
-
-As an alternative, you can set the parameter in the .env file:
-
-    FORCE_RECONFIGURE=true
-    
-Important: this parameter should be unset after the initial setup, otherwise
-you may lose the application settings.
-
-## Configuring Headwind MDM
-
-The Headwind MDM config file is mapped to `volumes/hmdm-config/ROOT.xml`. 
-
-Restarting the container applies the changes. To avoid loss of changes, make sure 
-the `FORCE_RECONFIGURE` flag is not set in the `.env` file (this flag forces 
-the container to reset the XML config file to its default state).
-
-## Using custom SSL certificates in Docker Compose
-
-To use custom SSL certificates
-
-- Comment out the whole certbot: section in docker-compose.yaml
-- Create the subdirectory ./volumes/letsencrypt/live/your-domain.com/
-- Copy the private key, certificate, and full certificate chain
-- in the PEM (base64) format to that subdirectory. Use the following names:
-- cert.pem, fullchain.pem, privkey.pem
-
-To use plain HTTP, edit the contents of the docker-compose.yaml:
-
-- Comment out the certbot: section
-- Uncomment the port 80 forwarding
-- Set the environment variable in the .env file: PROTOCOL=http
-
+This repository retains the upstream Headwind MDM licensing and attribution. See `LICENSE`.

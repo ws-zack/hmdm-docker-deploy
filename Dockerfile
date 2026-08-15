@@ -13,17 +13,9 @@ RUN apt-get install -y \
 RUN mkdir -p /usr/local/tomcat/conf/Catalina/localhost
 RUN mkdir -p /usr/local/tomcat/ssl
 
-# Set to 1 to force updating the config files
-# If not set, they will be created only if there's no files
-#ENV FORCE_RECONFIGURE=true
 ENV FORCE_RECONFIGURE=
-
-# Available values: en, ru (en by default)
 ENV INSTALL_LANGUAGE=en
 
-#ENV ADMIN_EMAIL=
-
-# Different for open source and premium versions!
 ENV SHARED_SECRET=changeme-C3z9vi54
 
 ENV HMDM_VARIANT=os
@@ -37,17 +29,17 @@ ENV SQL_BASE=hmdm
 ENV SQL_USER=hmdm
 ENV SQL_PASS=Ch@nGeMe
 
+# PROTOCOL controls Tomcat transport. BASE_URL, when supplied, is the externally
+# visible application URL and allows HTTPS to terminate at a reverse proxy.
 ENV PROTOCOL=https
+ENV BASE_URL=
 #ENV BASE_DOMAIN=your-domain.com
 
-# Set this parameter to your local IP address 
-# if your server is behind the NAT
+# Set this parameter to your local IP address if your server is behind NAT.
 #ENV LOCAL_IP=172.31.91.82
 
-# Comment it to use custom certificates
+# Used only when Tomcat itself terminates HTTPS.
 ENV HTTPS_LETSENCRYPT=true
-# Mount the custom certificate path if custom certificates must be used
-# ENV_HTTPS_CERT_PATH is the path to certificates and keys inside the container
 #ENV HTTPS_CERT_PATH=/cert
 ENV HTTPS_CERT=cert.pem
 ENV HTTPS_FULLCHAIN=fullchain.pem
@@ -59,7 +51,7 @@ EXPOSE 31000
 
 COPY docker-entrypoint.sh /
 COPY update-web-app-docker.sh /opt/hmdm/
-COPY tomcat_conf/server.xml /usr/local/tomcat/conf/server.xml 
+COPY tomcat_conf/server.xml /usr/local/tomcat/conf/server.xml
 ADD templates /opt/hmdm/templates/
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
